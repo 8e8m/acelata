@@ -1,0 +1,41 @@
+Acelata     :   Nuke for 260720 /chad/ Gamejam
+Finished    :   20260729 (On TIME)
+Gamejam     :  <https://game.chud.cyou/260720>
+
+ Please Enjoy.
+
+-- HOW TO PLAY --
+
+ ./acelata.out <player-count {2}-4>
+
+ WASD         + E
+ IJKL         + O
+ ARROW        + 0
+ KEYPAD ARROW + +
+
+-- ----------- --
+
+ Instructions for compilation follow...
+
+-- Desktop --
+
+:::Some assembly required:::
+
+git clone https://github.com/8e8m/acelata --depth=1
+cd acelata
+make run
+
+ # ... inside acelata ...
+
+ # Ensure libraylib.so.5.5/libglfw.so exists in your linker path.
+ # If you do not or cannot install raylib via your package manager:
+
+git clone https://github.com/raysan5/raylib --depth=1
+sudo make -C raylib/src/ PLATFORM=PLATFORM_DESKTOP BUILD_MODE=RELEASE RAYLIB_LIBTYPE=SHARED install
+
+ # Ensure libchad.so (https://github.com/BasedProject/libchad) exists in your linker path.
+git clone https://github.com/BasedProject/libchad --depth=1
+sudo make -C libchad install
+
+-- License --
+SPDX ID: GPL-3.0-only, unless explicitly specified otherwise.
