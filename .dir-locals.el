@@ -1,0 +1,6 @@
+((c-mode . ((c-basic-offset . 2)
+            (indent-tabs-mode . nil)
+            (fill-column . 120)))
+ (c++-mode . ((c-basic-offset . 2)
+              (indent-tabs-mode . nil)
+              (fill-column . 120))))

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat >&2 <<EOF
+usage: $(basename "$0") [options] [file|dir ...]
+
+options:
+  --staged   format only git-staged C/C++ files (used by pre-commit hook)
+  --check    dry-run: exit 1 if any file would be reformatted, don't write
+  -h, --help this message
+
+defaults to the whole repo tree when no paths are given.
+EOF
+    exit 1
+}
+
+STAGED=0
+CHECK=0
+TARGETS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --staged) STAGED=1 ;;
+        --check)  CHECK=1  ;;
+        -h|--help) usage   ;;
+        -*) echo >&2 "unknown option: $1"; usage ;;
+        *)  TARGETS+=("$1") ;;
+    esac
+    shift
+done
+
+command -v clang-format >/dev/null 2>&1 \
+    || { echo >&2 "clang-format: not found in PATH"; exit 1; }
+
+REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+DEFAULT="${REPO}/source"
+
+collect() {
+    find "$@" -type f \( -name '*.c' -o -name '*.h' -o -name '*.c++' -o -name '*.h++' -o -name '*.cpp' -o -name '*.hpp' \) \
+         ! -path '*/.git/*'
+}
+
+if (( STAGED )); then
+    mapfile -t FILES < <(git diff --cached --name-only --diff-filter=ACMR \
+                         | grep -E '\.(c|cpp|cc|cxx|h|hpp)$' || true)
+elif (( ${#TARGETS[@]} )); then
+    mapfile -t FILES < <(collect "${TARGETS[@]}")
+else
+    mapfile -t FILES < <(collect "${DEFAULT}")
+fi
+
+(( ${#FILES[@]} )) || exit 0
+
+DIRTY=0
+for f in "${FILES[@]}"; do
+    [[ -f "$f" ]] || continue
+    if (( CHECK )); then
+        if ! clang-format --dry-run --Werror --style=file "$f" 2>/dev/null; then
+            echo "would reformat: $f"
+            DIRTY=1
+        fi
+    else
+        clang-format -i --style=file "$f"
+        (( STAGED )) && git add -- "$f"
+    fi
+done
+
+(( CHECK && DIRTY )) && { echo >&2 "format check failed"; exit 1; }
+exit 0
