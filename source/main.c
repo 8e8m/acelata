@@ -354,7 +354,8 @@ void update_players(game_t * game)
     { if (j == i) continue;
       if (*game->player_health[j] == 0) continue;
       for (k = 0; k < bullets; ++k)
-      { if (*game->bullet_hypot[j][k] > 0.2 && CheckCollisionPointRec(*(v2*) game->bullet[j][k], (Rectangle) { game->player[i]->x + 20, game->player[i]->y + 20, 40, 40 }))
+      { if (*game->bullet_hypot[j][k] > 0.2 && CheckCollisionPointRec(*(v2*) game->bullet[j][k], (Rectangle) { game->player[i]->x - 15, game->player[i]->y - 15, 30, 30 }))
+
         { *game->player_invuln[i] = 60;
           *game->bullet_velocity[j][k] = (v3) {0};
           --*game->player_health[i];
@@ -381,6 +382,7 @@ void draw_players(game_t * game)
     DrawCenteredWrapped(boat, (Rectangle) { 0, 0, game->texture[BOAT]->width, game->texture[BOAT]->height }, (Rectangle) { game->player[i]->x, game->player[i]->y, 70, 70 }, screen, game->player[i]->z + 90, c);
     DrawCenteredWrapped(game->texture[CANNON], (Rectangle) { 0, 0, game->texture[CANNON]->width, game->texture[CANNON]->height }, (Rectangle) { game->player[i]->x - 10, game->player[i]->y, 30, 30 }, screen, game->player[i]->z - 90, c);
     DrawCenteredWrapped(game->texture[CANNON], (Rectangle) { 0, 0, game->texture[CANNON]->width, game->texture[CANNON]->height }, (Rectangle) { game->player[i]->x + 10, game->player[i]->y, 30, 30 }, screen, game->player[i]->z + 90, c);
+    /* DrawRectangleRec((Rectangle) { game->player[i]->x - 15, game->player[i]->y - 15, 30, 30 }, RED); */
   }
 }
 
