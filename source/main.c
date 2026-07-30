@@ -5,14 +5,52 @@
  * TABULATED.
  */
 
+/* Notes from anon regarding what he added:
+ *  > AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+ *  > my changes are generally surrounded by "// ---"
+ *  > the argument handling is absolute trash,
+ *     it can light on fire in a million different ways,
+ *     there is no error checking what so ever;
+ *     but i wont even try to appeal to your autism
+ *  > im using enet, because im using enet
+ *  > each ship may or may not be a remote peer
+ *  > multiple ships may or may not be owned by the same remote peer
+ *  > i have absolutely no error checking on whether
+ *      there is a collision on ship ownership
+ *  > each frame, each player sends out the position of their own ship
+ *     and the location of their bullets
+ *  > if a packet is dropped, bullet positions are interpolated
+ *  > we send all bullets all of time because if a packet were to be dropped during firing,
+ *     that would be a nightmare to correct otherwise
+ *  > given the pace and scale of the game, this will feel most fair,
+ *     if you did not hit me on my screen, you did not hit me at all;
+ *     while this could theoretically be frustrating,
+ *     its better than the alternative of dying from out of nowhere
+ *  > the game restart may get desynced,
+ *     if i had to, i would fix that by sending out a "restart rn frfr" flag
+ *  > if there was a score, i would make each peer keep track of and send out theirs
+ *  > the type of serialization package_player_state represents is
+ *     what textbooks will scream at you for,
+ *     it doesnt account for platform / compiler specific wiggle room
+ *  > it works, use this:
+ *    $ ./acelata.out 2 "X000" 127.0.0.1
+ *    $ ./acelata.out 2 "0X00" 127.0.0.1
+ *  > 4 player is a bit fucked, if no peer is connected, nobody is updating the ships,
+ *     and as such they Deadlo... no, wait, im not legally allow to say that word
+ *  > on kill, the clients will desync because the visuals and start() share the same RNG,
+ *     but the clients are not launched at the same femtoinstant
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <chad/random/grand.h>
 #include <chad/change_directory.h>
 #include <chad/utils.h>
 #include <chad/terry.h>
 #include <raylib.h>
 #include "raylib-extra.h"
+#include <enet/enet.h>
 
 Font g_font;
 
@@ -66,6 +104,11 @@ enum {
   textures,
 };
 
+typedef struct player_connection_t
+{ bool is_remote;
+  ENetPeer * peer;
+} player_connection_t;
+
 #define islands 64
 #define decals 255
 #define bullets 128
@@ -90,7 +133,35 @@ typedef struct game_t
   v2 direction[players][1];
   f32 turnspeed[players][1];
   Texture texture[textures][1];
+  // ---
+  ENetHost * host;
+  player_connection_t connection[players];
+  // ---
 } game_t;
+
+// ---
+#define PORT 8697
+#define for_i_in_players for (int i = 0; i < players; i++)
+
+bool is_online_play(game_t * game) {
+    for_i_in_players {
+        if (game->connection[i].is_remote) {
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef struct game_packet_t {
+    u8 ship_index;
+    v3 ship_position;
+    v2 ship_velocity;
+    int ship_health;
+    int ship_invuln;
+    v3 bullet[bullets];
+    v3 bullet_velocity[bullets];
+} game_packet_t;
+// ---
 
 Color color[players] =
   { RED,
@@ -300,8 +371,191 @@ void insert_bullet(game_t * game, int pi, v3 position, v3 velocity)
   *game->bullet_hypot[pi][lowest_index] = hypot(game->bullet_velocity[pi][lowest_index]->x, game->bullet_velocity[pi][lowest_index]->y);
 }
 
-void update_players(game_t * game)
-{ size_t i, j, k;
+// ---
+void package_player_state(game_t * game, int i, game_packet_t * out) {
+    out->ship_index = i;
+
+    memcpy(
+        &out->ship_position,
+        game->player[i],
+        sizeof(out->ship_position)
+    );
+
+    memcpy(
+        &out->ship_velocity,
+        game->player_velocity[i],
+        sizeof(out->ship_velocity)
+    );
+
+    memcpy(
+        &out->ship_health,
+        game->player_health[i],
+        sizeof(out->ship_health)
+    );
+
+    memcpy(
+        &out->ship_invuln,
+        game->player_invuln[i],
+        sizeof(out->ship_invuln)
+    );
+
+    memcpy(
+        out->bullet,
+        game->bullet[i],
+        sizeof(out->bullet)
+    );
+
+    memcpy(
+        out->bullet_velocity,
+        game->bullet_velocity[i],
+        sizeof(out->bullet_velocity)
+    );
+}
+
+void update_player_from_packet(game_t * game, const game_packet_t *packet) {
+    int i = packet->ship_index;
+
+    if (i < 0
+    ||  i >= players) {
+        TraceLog(LOG_ERROR, "Non-sense i ('%d') from peer packet", i);
+        return;
+    }
+
+    memcpy(
+        game->player[i],
+        &packet->ship_position,
+        sizeof(v3)
+    );
+
+    memcpy(
+        game->player_velocity[i],
+        &packet->ship_velocity,
+        sizeof(packet->ship_velocity)
+    );
+
+    memcpy(
+        game->player_health[i],
+        &packet->ship_health,
+        sizeof(packet->ship_health)
+    );
+
+    memcpy(
+        game->player_invuln[i],
+        &packet->ship_invuln,
+        sizeof(packet->ship_invuln)
+    );
+
+    memcpy(
+        game->bullet[i],
+        packet->bullet,
+        sizeof(packet->bullet)
+    );
+
+    memcpy(
+        game->bullet_velocity[i],
+        packet->bullet_velocity,
+        sizeof(packet->bullet_velocity)
+    );
+
+    for (int j = 0; j < bullets; j++) {
+        *game->bullet_hypot[i][j] =
+            hypotf(
+                game->bullet_velocity[i][j]->x,
+                game->bullet_velocity[i][j]->y
+            );
+    }
+}
+
+int find_player_by_peer(game_t * game, ENetPeer * peer) {
+    for_i_in_players {
+        if (game->connection[i].peer == peer) {
+            return i;
+        }
+    }
+
+    TraceLog(
+        LOG_INFO,
+        "Failed to find player by peer"
+    );
+
+    return -1;
+}
+
+void remote_update_players(game_t * game) {
+    ENetEvent event;
+    while (enet_host_service(game->host, &event, 0) > 0) {
+        if (event.type == ENET_EVENT_TYPE_CONNECT) {
+            TraceLog(
+                LOG_INFO,
+                "CONNECT peer=%p host=%x port=%u",
+                (void*)event.peer,
+                event.peer->address.host,
+                event.peer->address.port
+            );
+            continue;
+        } else
+        if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+            TraceLog(
+                LOG_INFO,
+                "DISCONNECT peer=%p",
+                (void*)event.peer
+            );
+            continue;
+        } else
+        if (event.type != ENET_EVENT_TYPE_RECEIVE) {
+            continue;
+        }
+
+        TraceLog(
+            LOG_INFO,
+            "RECEIVE peer=%p",
+            (void*)event.peer
+        );
+
+        if (event.packet->dataLength == sizeof(game_packet_t)) {
+            game_packet_t packet;
+            memcpy(&packet, event.packet->data, sizeof(packet));
+
+            update_player_from_packet(game, &packet);
+        }
+
+        enet_packet_destroy(event.packet);
+    }
+}
+
+void send_player_update(game_t * game, int host_index) {
+    game_packet_t packet;
+    package_player_state(game, host_index, &packet);
+
+    for_i_in_players {
+        if (!game->connection[i].is_remote) {
+            continue;
+        }
+
+        ENetPeer * peer = game->connection[i].peer;
+        if (peer
+        &&  peer->state == ENET_PEER_STATE_CONNECTED) {
+            ENetPacket * p = enet_packet_create(
+                &packet,
+                sizeof(packet),
+                //ENET_PACKET_FLAG_UNSEQUENCED
+                0
+            );
+            TraceLog(
+                LOG_INFO,
+                "SEND player=%d peer=%p state=%d len=%zu",
+                host_index,
+                (void *)peer,
+                peer->state,
+                sizeof(game_packet_t)
+            );
+            enet_peer_send(peer, 0, p);
+        }
+    }
+}
+// ---
+
+void local_update_player(game_t * game, int i) {
   int keys[players][5] =
     { { KEY_W,       KEY_S,    KEY_A,     KEY_D, KEY_E },
       { KEY_I,       KEY_K,    KEY_J,     KEY_L, KEY_O },
@@ -324,48 +578,66 @@ void update_players(game_t * game)
     { nullcancel(player_index, x, east, west);             \
       nullcancel(player_index, y, north, south);           \
     } while (0);
-  for (i = 0; i < game->player_count; ++i)
-  { if (*game->player_health[i] == 0) continue;
 
-    polar(i, keys[i][0], keys[i][1], keys[i][2], keys[i][3]);
+  if (*game->player_health[i] == 0) return;
 
-    game->player_velocity[i]->y += game->direction[i]->y * speed->y;
-    game->player_velocity[i]->x += game->direction[i]->x * speed->x;
-    game->player_velocity[i]->y *= dampen->y;
-    game->player_velocity[i]->x *= dampen->x;
+  polar(i, keys[i][0], keys[i][1], keys[i][2], keys[i][3]);
 
-    game->player[i]->z += game->player_velocity[i]->x;
-    game->player[i]->x += cosf(DEG2RAD * game->player[i]->z) * game->player_velocity[i]->y;
-    game->player[i]->y += sinf(DEG2RAD * game->player[i]->z) * game->player_velocity[i]->y;
+  game->player_velocity[i]->y += game->direction[i]->y * speed->y;
+  game->player_velocity[i]->x += game->direction[i]->x * speed->x;
+  game->player_velocity[i]->y *= dampen->y;
+  game->player_velocity[i]->x *= dampen->x;
 
-    wrap((v2*)game->player[i], &screen);
+  game->player[i]->z += game->player_velocity[i]->x;
+  game->player[i]->x += cosf(DEG2RAD * game->player[i]->z) * game->player_velocity[i]->y;
+  game->player[i]->y += sinf(DEG2RAD * game->player[i]->z) * game->player_velocity[i]->y;
 
-    if (++(*game->player_last_shot[i]) > 13 && IsKeyPressed(keys[i][4]))
-    { v3 rotate = *game->player[i];
-      rotate.z += 45;
-      insert_bullet(game, i, rotate, bullet_speed);
-      rotate.z -= 180;
-      insert_bullet(game, i, rotate, bullet_speed);
-      *game->player_last_shot[i] = 0;
-    }
+  wrap((v2*)game->player[i], &screen);
 
-    if (*game->player_invuln[i] > 0) --*game->player_invuln[i];
-    else for (j = 0; j < game->player_count; ++j)
-    { if (j == i) continue;
-      if (*game->player_health[j] == 0) continue;
-      for (k = 0; k < bullets; ++k)
-      { if (*game->bullet_hypot[j][k] > 0.2 && CheckCollisionPointRec(*(v2*) game->bullet[j][k], (Rectangle) { game->player[i]->x - 15, game->player[i]->y - 15, 30, 30 }))
+  if (++(*game->player_last_shot[i]) > 13 && IsKeyPressed(keys[i][4]))
+  { v3 rotate = *game->player[i];
+    rotate.z += 45;
+    insert_bullet(game, i, rotate, bullet_speed);
+    rotate.z -= 180;
+    insert_bullet(game, i, rotate, bullet_speed);
+    *game->player_last_shot[i] = 0;
+  }
 
-        { *game->player_invuln[i] = 60;
-          *game->bullet_velocity[j][k] = (v3) {0};
-          --*game->player_health[i];
-          printf("Hit!\n");
-          goto next;
-        }
+  if (*game->player_invuln[i] > 0) --*game->player_invuln[i];
+  else for (int j = 0; j < game->player_count; ++j)
+  { if (j == i) continue;
+    if (*game->player_health[j] == 0) continue;
+    for (int k = 0; k < bullets; ++k)
+    { if (*game->bullet_hypot[j][k] > 0.2 && CheckCollisionPointRec(*(v2*) game->bullet[j][k], (Rectangle) { game->player[i]->x - 15, game->player[i]->y - 15, 30, 30 }))
+
+      { *game->player_invuln[i] = 60;
+        *game->bullet_velocity[j][k] = (v3) {0};
+        --*game->player_health[i];
+        printf("Hit!\n");
+        return;
       }
     }
-  next:;
   }
+}
+
+void update_players(game_t * game)
+{ size_t i, j, k;
+  bool is_this_online_play = is_online_play(game);
+
+  if (is_this_online_play) {
+    remote_update_players(game);
+  }
+
+  for (i = 0; i < game->player_count; ++i) {
+    if (!game->connection[i].is_remote) {
+        local_update_player(game, i);
+        if (is_this_online_play) {
+            send_player_update(game, i);
+            enet_host_flush(game->host);
+        }
+    }
+  }
+
   size_t count = 0;
   for (i = 0; i < game->player_count; ++i) count += *game->player_health[i] > 0;
   if (count < 2) { start(game); return; }
@@ -397,12 +669,72 @@ main([[maybe_unused]] int ac, char ** av)
   game->player_count = strtol(av[1] ? av[1] : "2", NULL, 10);
   game->player_count = CLAMP(game->player_count, 2, 4);
 
+  if (ac > 2)
+  { for (int i = 0; i < players; i++) game->connection[i].is_remote = true;
+    for (char * ss = av[2]; *ss != '\0'; ++ss)
+    { if (*ss == 'X')
+      { game->connection[ss - av[2]].is_remote = false;
+      }
+    }
+  }
+
   *game->screen = (v2) {2000, 1000 };
   *game->margin = (v2) {game->screen->x * 0.1, game->screen->y * 0.1 };
   *game->scaled = raylib_init("Acer-Lata");
   *game->render_texture = LoadRenderTexture(game->screen->x, game->screen->y);
 
   load_textures(game);
+
+  // ---
+  if (is_online_play(game)) {
+    if (enet_initialize() != 0) {
+        TraceLog(LOG_FATAL, "Failed to initialize ENet");
+        return 1;
+    }
+    atexit(enet_deinitialize);
+
+    int offset;
+    for_i_in_players {
+        if (!game->connection[i].is_remote) {
+            offset = i;
+            break;
+        }
+    }
+
+    ENetAddress host_address;
+    host_address.host = ENET_HOST_ANY;
+    host_address.port = PORT + offset;
+
+    TraceLog(LOG_INFO, "Host Port: %d", host_address.port);
+
+    game->host = enet_host_create(
+        &host_address,
+        4, // max peers
+        4, // n channels
+        0,
+        0
+    );
+
+    if (!game->host) {
+        TraceLog(LOG_ERROR, "Failed to create host");
+        return 1;
+    }
+
+    for_i_in_players {
+        if (game->connection[i].is_remote) {
+            ENetAddress remote;
+            enet_address_set_host(&remote, av[3]);
+            remote.port = PORT + i;
+            TraceLog(LOG_INFO, "Remote Port: %d", remote.port);
+            game->connection[i].peer = enet_host_connect(game->host, &remote, 1, 0);
+            if (!game->connection[i].peer) {
+                TraceLog(LOG_ERROR, "Failed to create outgoing connection");
+            }
+        }
+    }
+  }
+  // ---
+
   start(game);
 
   while (WindowOpen()) {
@@ -415,6 +747,7 @@ main([[maybe_unused]] int ac, char ** av)
       update_water_decals(game);
       update_bullets(game);
       update_players(game);
+
     }
     // Draw
     {
