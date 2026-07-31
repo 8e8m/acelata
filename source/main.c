@@ -666,6 +666,18 @@ main([[maybe_unused]] int ac, char ** av)
   size_t i;
   game_t game[1] = {0};
 
+  /* fuck you this is memory safe */
+  for (i = 1; i < ac; ++i) if (av[i][0] == '-' && av[i][1] != '\0' && (av[i][1] == '?' || av[i][1] == 'h' || av[i][2] == 'h'))
+  { printf("%s: [--help] | <Player Count> <Seating> <Host IP>\n"
+           "\tplayer count: 2 to 4.\n"
+           "\tseating: X represents the local players, example:\n"
+           "\t\tX___ = this connection controls player 1\n"
+           "\t\t_XX_ = this connection controls player 2 & 3\n"
+           "\t\tThe preceding _ is most important, the use of the character 'X' is critical\n"
+           "\thost IPv4 address: should be set for the host too. Enet does not support the 30 year old universalist internet protocol version 6.\n", av[0]);
+    return 0;
+  }
+
   game->player_count = strtol(av[1] ? av[1] : "2", NULL, 10);
   game->player_count = CLAMP(game->player_count, 2, 4);
 

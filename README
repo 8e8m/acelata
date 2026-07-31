@@ -6,12 +6,18 @@ Gamejam     :  <https://game.chud.cyou/260720>
 
 -- HOW TO PLAY --
 
- ./acelata.out <player-count {2}-4>
+./acelata.out: [--help] | <Player Count> <Seating> <Host IP>
+        player count: 2 to 4.
+        seating: X represents the local players, example:
+                X___ = this connection controls player 1
+                _XX_ = this connection controls player 2 & 3
+                The preceding _ is most important, the use of the character 'X' is critical
+        host IPv4 address: should be set for the host too. Enet does not support the 30 year old universalist internet protocol version 6.
 
  WASD         + E
  IJKL         + O
- ARROW        + 0
- KEYPAD ARROW + +
+ Arrow        + Enter
+ KEYPAD Arrow + KEYPAD Enter
 
 -- ----------- --
 
