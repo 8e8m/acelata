@@ -44,13 +44,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <chad/random/grand.h>
 #include <chad/change_directory.h>
 #include <chad/utils.h>
 #include <chad/terry.h>
 #include <raylib.h>
 #include "raylib-extra.h"
+#ifndef PLATFORM_WEB
 #include <enet/enet.h>
+#endif
 
 Font g_font;
 
@@ -62,7 +65,8 @@ Rectangle current_display_shape(void)
 }
 
 static void stderr_log_callback(int log_level, const char * text, va_list args)
-{ vfprintf(stderr, text, args);
+{ (void) log_level;
+  vfprintf(stderr, text, args);
   fputc('\n', stderr);
 }
 
@@ -70,7 +74,7 @@ v2 raylib_init(const char * title)
 { SetTraceLogLevel(is_dev ? LOG_ALL : LOG_WARNING);
   SetTraceLogCallback(stderr_log_callback);
 
-  Rectangle screen[1] = (Rectangle[1]){0, 0, 1920, 1080};
+  Rectangle screen[1] = (Rectangle[1]){ {0, 0, 1920, 1080} };
 
   SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
@@ -106,7 +110,11 @@ enum {
 
 typedef struct player_connection_t
 { bool is_remote;
+  #ifndef PLATFORM_WEB
   ENetPeer * peer;
+  #else
+  void * peer;
+  #endif
 } player_connection_t;
 
 #define islands 64
@@ -134,7 +142,11 @@ typedef struct game_t
   f32 turnspeed[players][1];
   Texture texture[textures][1];
   // ---
+  #ifndef PLATFORM_WEB
   ENetHost * host;
+  #else
+  void * host;
+  #endif
   player_connection_t connection[players];
   // ---
 } game_t;
@@ -144,12 +156,15 @@ typedef struct game_t
 #define for_i_in_players for (int i = 0; i < players; i++)
 
 bool is_online_play(game_t * game) {
-    for_i_in_players {
-        if (game->connection[i].is_remote) {
-            return true;
-        }
+  #ifdef PLATFORM_WEB
+  return false;
+  #endif
+  for_i_in_players {
+    if (game->connection[i].is_remote) {
+      return true;
     }
-    return false;
+  }
+  return false;
 }
 
 typedef struct game_packet_t {
@@ -266,7 +281,6 @@ void draw_water_decals(game_t * game)
 { for (size_t i = 0; i < decals; ++i)
   { Rectangle dest = (Rectangle) { sinf(game->fc * 0.01) * 100 + game->decal[i]->x, cosf(game->fc * 0.01) * 100 + game->decal[i]->y, game->texture[WATER_1]->width + 40 * cosf(game->fc * 0.001), game->texture[WATER_1]->height + 40 * sinf(game->fc * 0.01) };
     Rectangle shape = texture_shape(game->texture[WATER_1]); /* this is a cope */
-    v2 origin = (v2) { game->texture[WATER_1]->width * 0.5, game->texture[WATER_1]->height * 0.5 }; /* I am tormented by demons day and night */
     Rectangle screen = (Rectangle) { 0, 0, game->screen->x, game->screen->y };
     DrawCenteredWrapped(game->texture[WATER_1], shape, dest, screen, game->decal[i]->z, (Color) {129, 229, 230, grand_range_f64(100,180) } );
     dest.x += 20;
@@ -373,187 +387,188 @@ void insert_bullet(game_t * game, int pi, v3 position, v3 velocity)
 
 // ---
 void package_player_state(game_t * game, int i, game_packet_t * out) {
-    out->ship_index = i;
+  out->ship_index = i;
 
-    memcpy(
-        &out->ship_position,
-        game->player[i],
-        sizeof(out->ship_position)
-    );
+  memcpy(
+         &out->ship_position,
+         game->player[i],
+         sizeof(out->ship_position)
+         );
 
-    memcpy(
-        &out->ship_velocity,
-        game->player_velocity[i],
-        sizeof(out->ship_velocity)
-    );
+  memcpy(
+         &out->ship_velocity,
+         game->player_velocity[i],
+         sizeof(out->ship_velocity)
+         );
 
-    memcpy(
-        &out->ship_health,
-        game->player_health[i],
-        sizeof(out->ship_health)
-    );
+  memcpy(
+         &out->ship_health,
+         game->player_health[i],
+         sizeof(out->ship_health)
+         );
 
-    memcpy(
-        &out->ship_invuln,
-        game->player_invuln[i],
-        sizeof(out->ship_invuln)
-    );
+  memcpy(
+         &out->ship_invuln,
+         game->player_invuln[i],
+         sizeof(out->ship_invuln)
+         );
 
-    memcpy(
-        out->bullet,
-        game->bullet[i],
-        sizeof(out->bullet)
-    );
+  memcpy(
+         out->bullet,
+         game->bullet[i],
+         sizeof(out->bullet)
+         );
 
-    memcpy(
-        out->bullet_velocity,
-        game->bullet_velocity[i],
-        sizeof(out->bullet_velocity)
-    );
+  memcpy(
+         out->bullet_velocity,
+         game->bullet_velocity[i],
+         sizeof(out->bullet_velocity)
+         );
 }
 
+#ifndef PLATFORM_WEB
 void update_player_from_packet(game_t * game, const game_packet_t *packet) {
-    int i = packet->ship_index;
+  int i = packet->ship_index;
 
-    if (i < 0
-    ||  i >= players) {
-        TraceLog(LOG_ERROR, "Non-sense i ('%d') from peer packet", i);
-        return;
-    }
+  if (i < 0
+      ||  i >= players) {
+    TraceLog(LOG_ERROR, "Non-sense i ('%d') from peer packet", i);
+    return;
+  }
 
-    memcpy(
-        game->player[i],
-        &packet->ship_position,
-        sizeof(v3)
-    );
+  memcpy(
+         game->player[i],
+         &packet->ship_position,
+         sizeof(v3)
+         );
 
-    memcpy(
-        game->player_velocity[i],
-        &packet->ship_velocity,
-        sizeof(packet->ship_velocity)
-    );
+  memcpy(
+         game->player_velocity[i],
+         &packet->ship_velocity,
+         sizeof(packet->ship_velocity)
+         );
 
-    memcpy(
-        game->player_health[i],
-        &packet->ship_health,
-        sizeof(packet->ship_health)
-    );
+  memcpy(
+         game->player_health[i],
+         &packet->ship_health,
+         sizeof(packet->ship_health)
+         );
 
-    memcpy(
-        game->player_invuln[i],
-        &packet->ship_invuln,
-        sizeof(packet->ship_invuln)
-    );
+  memcpy(
+         game->player_invuln[i],
+         &packet->ship_invuln,
+         sizeof(packet->ship_invuln)
+         );
 
-    memcpy(
-        game->bullet[i],
-        packet->bullet,
-        sizeof(packet->bullet)
-    );
+  memcpy(
+         game->bullet[i],
+         packet->bullet,
+         sizeof(packet->bullet)
+         );
 
-    memcpy(
-        game->bullet_velocity[i],
-        packet->bullet_velocity,
-        sizeof(packet->bullet_velocity)
-    );
+  memcpy(
+         game->bullet_velocity[i],
+         packet->bullet_velocity,
+         sizeof(packet->bullet_velocity)
+         );
 
-    for (int j = 0; j < bullets; j++) {
-        *game->bullet_hypot[i][j] =
-            hypotf(
-                game->bullet_velocity[i][j]->x,
-                game->bullet_velocity[i][j]->y
-            );
-    }
+  for (int j = 0; j < bullets; j++) {
+    *game->bullet_hypot[i][j] =
+      hypotf(
+             game->bullet_velocity[i][j]->x,
+             game->bullet_velocity[i][j]->y
+             );
+  }
 }
 
 int find_player_by_peer(game_t * game, ENetPeer * peer) {
-    for_i_in_players {
-        if (game->connection[i].peer == peer) {
-            return i;
-        }
+  for_i_in_players {
+    if (game->connection[i].peer == peer) {
+      return i;
     }
+  }
 
-    TraceLog(
-        LOG_INFO,
-        "Failed to find player by peer"
-    );
+  TraceLog(
+           LOG_INFO,
+           "Failed to find player by peer"
+           );
 
-    return -1;
+  return -1;
 }
 
 void remote_update_players(game_t * game) {
-    ENetEvent event;
-    while (enet_host_service(game->host, &event, 0) > 0) {
-        if (event.type == ENET_EVENT_TYPE_CONNECT) {
-            TraceLog(
-                LOG_INFO,
-                "CONNECT peer=%p host=%x port=%u",
-                (void*)event.peer,
-                event.peer->address.host,
-                event.peer->address.port
-            );
-            continue;
-        } else
-        if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
-            TraceLog(
-                LOG_INFO,
-                "DISCONNECT peer=%p",
-                (void*)event.peer
-            );
-            continue;
-        } else
-        if (event.type != ENET_EVENT_TYPE_RECEIVE) {
-            continue;
-        }
-
+  ENetEvent event;
+  while (enet_host_service(game->host, &event, 0) > 0) {
+    if (event.type == ENET_EVENT_TYPE_CONNECT) {
+      TraceLog(
+               LOG_INFO,
+               "CONNECT peer=%p host=%x port=%u",
+               (void*)event.peer,
+               event.peer->address.host,
+               event.peer->address.port
+               );
+      continue;
+    } else
+      if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
         TraceLog(
-            LOG_INFO,
-            "RECEIVE peer=%p",
-            (void*)event.peer
-        );
-
-        if (event.packet->dataLength == sizeof(game_packet_t)) {
-            game_packet_t packet;
-            memcpy(&packet, event.packet->data, sizeof(packet));
-
-            update_player_from_packet(game, &packet);
+                 LOG_INFO,
+                 "DISCONNECT peer=%p",
+                 (void*)event.peer
+                 );
+        continue;
+      } else
+        if (event.type != ENET_EVENT_TYPE_RECEIVE) {
+          continue;
         }
 
-        enet_packet_destroy(event.packet);
+    TraceLog(
+             LOG_INFO,
+             "RECEIVE peer=%p",
+             (void*)event.peer
+             );
+
+    if (event.packet->dataLength == sizeof(game_packet_t)) {
+      game_packet_t packet;
+      memcpy(&packet, event.packet->data, sizeof(packet));
+
+      update_player_from_packet(game, &packet);
     }
+
+    enet_packet_destroy(event.packet);
+  }
 }
 
 void send_player_update(game_t * game, int host_index) {
-    game_packet_t packet;
-    package_player_state(game, host_index, &packet);
+  game_packet_t packet;
+  package_player_state(game, host_index, &packet);
 
-    for_i_in_players {
-        if (!game->connection[i].is_remote) {
-            continue;
-        }
-
-        ENetPeer * peer = game->connection[i].peer;
-        if (peer
-        &&  peer->state == ENET_PEER_STATE_CONNECTED) {
-            ENetPacket * p = enet_packet_create(
-                &packet,
-                sizeof(packet),
-                //ENET_PACKET_FLAG_UNSEQUENCED
-                0
-            );
-            TraceLog(
-                LOG_INFO,
-                "SEND player=%d peer=%p state=%d len=%zu",
-                host_index,
-                (void *)peer,
-                peer->state,
-                sizeof(game_packet_t)
-            );
-            enet_peer_send(peer, 0, p);
-        }
+  for_i_in_players {
+    if (!game->connection[i].is_remote) {
+      continue;
     }
+
+    ENetPeer * peer = game->connection[i].peer;
+    if (peer
+        &&  peer->state == ENET_PEER_STATE_CONNECTED) {
+      ENetPacket * p = enet_packet_create(
+                                          &packet,
+                                          sizeof(packet),
+                                          //ENET_PACKET_FLAG_UNSEQUENCED
+                                          0
+                                          );
+      TraceLog(
+               LOG_INFO,
+               "SEND player=%d peer=%p state=%d len=%zu",
+               host_index,
+               (void *)peer,
+               peer->state,
+               sizeof(game_packet_t)
+               );
+      enet_peer_send(peer, 0, p);
+    }
+  }
 }
-// ---
+#endif
 
 void local_update_player(game_t * game, int i) {
   int keys[players][5] =
@@ -562,8 +577,8 @@ void local_update_player(game_t * game, int i) {
       { KEY_UP,   KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER },
       { KEY_KP_8, KEY_KP_2, KEY_KP_4,  KEY_KP_6, KEY_KP_ENTER },
     };
-  v2 speed[1]  = { 0.35, 0.2 };
-  v2 dampen[1] = { 0.91, 0.97 };
+  v2 speed[1]  = (v2[1]) { {0.35, 0.2} };
+  v2 dampen[1] = (v2[1]) { {0.91, 0.97} };
   /* -- */
   v3 bullet_speed = (v3) {5, 5, 0};
   Rectangle screen = (Rectangle) { 0, 0, game->screen->x, game->screen->y };
@@ -604,7 +619,7 @@ void local_update_player(game_t * game, int i) {
   }
 
   if (*game->player_invuln[i] > 0) --*game->player_invuln[i];
-  else for (int j = 0; j < game->player_count; ++j)
+  else for (int j = 0; j < (int) game->player_count; ++j)
   { if (j == i) continue;
     if (*game->player_health[j] == 0) continue;
     for (int k = 0; k < bullets; ++k)
@@ -621,20 +636,24 @@ void local_update_player(game_t * game, int i) {
 }
 
 void update_players(game_t * game)
-{ size_t i, j, k;
+{ size_t i;
+  #ifndef PLATFORM_WEB
   bool is_this_online_play = is_online_play(game);
 
   if (is_this_online_play) {
     remote_update_players(game);
   }
+  #endif
 
   for (i = 0; i < game->player_count; ++i) {
     if (!game->connection[i].is_remote) {
         local_update_player(game, i);
+        #ifndef PLATFORM_WEB
         if (is_this_online_play) {
             send_player_update(game, i);
             enet_host_flush(game->host);
         }
+        #endif
     }
   }
 
@@ -667,7 +686,7 @@ main([[maybe_unused]] int ac, char ** av)
   game_t game[1] = {0};
 
   /* fuck you this is memory safe */
-  for (i = 1; i < ac; ++i) if (av[i][0] == '-' && av[i][1] != '\0' && (av[i][1] == '?' || av[i][1] == 'h' || av[i][2] == 'h'))
+  for (i = 1; (int) i < ac; ++i) if (av[i][0] == '-' && av[i][1] != '\0' && (av[i][1] == '?' || av[i][1] == 'h' || av[i][2] == 'h'))
   { printf("%s: [--help] | <Player Count> <Seating> <Host IP>\n"
            "\tplayer count: 2 to 4.\n"
            "\tseating: X represents the local players, example:\n"
@@ -697,20 +716,28 @@ main([[maybe_unused]] int ac, char ** av)
 
   load_textures(game);
 
+  for_i_in_players {
+    if (!game->connection[i].is_remote) {
+      game->connection[i].is_remote = 0;
+      break;
+    }
+  }
+
   // ---
+  #ifndef PLATFORM_WEB
   if (is_online_play(game)) {
     if (enet_initialize() != 0) {
-        TraceLog(LOG_FATAL, "Failed to initialize ENet");
-        return 1;
+      TraceLog(LOG_FATAL, "Failed to initialize ENet");
+      return 1;
     }
     atexit(enet_deinitialize);
 
     int offset;
     for_i_in_players {
-        if (!game->connection[i].is_remote) {
-            offset = i;
-            break;
-        }
+      if (!game->connection[i].is_remote) {
+        offset = i;
+        break;
+      }
     }
 
     ENetAddress host_address;
@@ -720,32 +747,32 @@ main([[maybe_unused]] int ac, char ** av)
     TraceLog(LOG_INFO, "Host Port: %d", host_address.port);
 
     game->host = enet_host_create(
-        &host_address,
-        4, // max peers
-        4, // n channels
-        0,
-        0
-    );
+                                  &host_address,
+                                  4, // max peers
+                                  4, // n channels
+                                  0,
+                                  0
+                                  );
 
     if (!game->host) {
-        TraceLog(LOG_ERROR, "Failed to create host");
-        return 1;
+      TraceLog(LOG_ERROR, "Failed to create host");
+      return 1;
     }
 
     for_i_in_players {
-        if (game->connection[i].is_remote) {
-            ENetAddress remote;
-            enet_address_set_host(&remote, av[3]);
-            remote.port = PORT + i;
-            TraceLog(LOG_INFO, "Remote Port: %d", remote.port);
-            game->connection[i].peer = enet_host_connect(game->host, &remote, 1, 0);
-            if (!game->connection[i].peer) {
-                TraceLog(LOG_ERROR, "Failed to create outgoing connection");
-            }
+      if (game->connection[i].is_remote) {
+        ENetAddress remote;
+        enet_address_set_host(&remote, av[3]);
+        remote.port = PORT + i;
+        TraceLog(LOG_INFO, "Remote Port: %d", remote.port);
+        game->connection[i].peer = enet_host_connect(game->host, &remote, 1, 0);
+        if (!game->connection[i].peer) {
+          TraceLog(LOG_ERROR, "Failed to create outgoing connection");
         }
+      }
     }
   }
-  // ---
+  #endif
 
   start(game);
 
@@ -755,7 +782,7 @@ main([[maybe_unused]] int ac, char ** av)
     { /* for (i = 0; i < 4; ++i) if (fabsf(game->direction[i]->y) > 0.1 || fabs(game->direction[i]->x) > 0.1) printf("[+NS, +EW] %f %f\n", game->direction[i]->y, game->direction[i]->x); // test polarity */
       game->scaled->x = GetRenderWidth();
       game->scaled->y = GetRenderHeight();
-      if (IsKeyPressed(KEY_F1)) start(game);
+      if (IsKeyPressed(KEY_ONE)) start(game);
       update_water_decals(game);
       update_bullets(game);
       update_players(game);

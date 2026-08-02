@@ -1,0 +1,37 @@
+DEBUG ?= 0
+ifneq ($(DEBUG),0)
+CFLAGS := -ggdb -fsanitize=address
+endif
+
+SHARED_CFLAGS   += -pipe -std=gnu23 -O2 -flto=auto -Wall -Wextra -Wpedantic -Wno-gnu-compound-literal-initializer
+SHARED_CPPFLAGS := -Ilibrary -Ilibrary/chad -D_GNU_SOURCE -D_FORTIFY_SOURCE=3
+
+CC       := emcc
+
+CFLAGS   := \
+        $(SHARED_CFLAGS) \
+        --preload-file resource
+
+CPPFLAGS := -Iraylib/src -Ilibrary/chad $(SHARED_CPPFLAGS) -DPLATFORM_WEB -DDEBUG=0
+
+LDFLAGS  := \
+        -s INITIAL_MEMORY=64MB \
+        -s ALLOW_MEMORY_GROWTH=1 \
+        -s STACK_SIZE=4MB \
+        -s MAX_WEBGL_VERSION=2 \
+        -s MIN_WEBGL_VERSION=2 \
+        -s ASYNCIFY=1 \
+        -s EXPORTED_RUNTIME_METHODS='["requestFullscreen"]' \
+        -s USE_WEBGL2=1 \
+        -s USE_GLFW=3 \
+        -s ASSERTIONS=0 \
+        -s SAFE_HEAP=0 \
+        -s STACK_OVERFLOW_CHECK=0 \
+        -s EMIT_EMSCRIPTEN_METADATA=0 \
+        -s FORCE_FILESYSTEM=0
+
+acelata.html: $(wildcard source/*.c) $(filter-out main.c,$(wildcard library/chad/*.c)) $(wildcard library/chad/random/*.c)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $+ raylib/src/libraylib.web.a $(LDFLAGS)
+
+run: acelata.html
+	emrun acelata.html

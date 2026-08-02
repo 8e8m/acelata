@@ -17,7 +17,7 @@ WARNING.filter := -Wno-unused-parameter -Wno-switch -Wno-c99-extensions -Wno-c99
 
 CFLAGS   := -std=c23 -pthread ${WARNING.filter}
 CXXFLAGS := -std=c++20 -pthread ${WARNING.filter}
-CPPFLAGS := -Ilibrary -I/usr/include/chad/ -D_GNU_SOURCE # -DVERSION=$(shell cat VERSION) -DCOMMIT=$(shell cat .git/refs/heads/master)
+CPPFLAGS := -Ilibrary -Ilibrary -D_GNU_SOURCE # -DVERSION=$(shell cat VERSION) -DCOMMIT=$(shell cat .git/refs/heads/master)
 LDFLAGS  := -lm -lraylib -lX11 -lglfw -lchad -larchive -lvterm -lenet
 
 SOURCE.dir := source
