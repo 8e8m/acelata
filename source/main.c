@@ -59,6 +59,22 @@ Font g_font;
 
 bool is_dev = DEBUG;
 
+grand_t local_grand[1] = {0};
+
+static inline u64 RANDOM_PREFIX(grand_u64_next)(grand_t * grand) {
+  #if GRAND_WIDTH >= 64
+  return grand_next(grand_value);
+  #else
+  u64 r = ((u64) grand_next(grand) <<  0)
+        | ((u64) grand_next(grand) << 32);
+  return r;
+  #endif
+}
+
+static inline f64 RANDOM_PREFIX(grand_f64_next)(grand_t * grand) {
+  return (grand_u64_next(grand) >> 11) * 0x1.0p-53;
+}
+
 Rectangle current_display_shape(void)
 { int monitor = GetCurrentMonitor();
   return (Rectangle) { 0, 0, (float) GetMonitorWidth(monitor), (float) GetMonitorHeight(monitor) };
@@ -139,7 +155,6 @@ typedef struct game_t
   int player_invuln[players][1];
   float player_last_shot[players][1];
   v2 direction[players][1];
-  f32 turnspeed[players][1];
   Texture texture[textures][1];
   // ---
   #ifndef PLATFORM_WEB
@@ -208,7 +223,7 @@ int load_textures(struct game_t * game)
 void start(game_t * game)
 { size_t i, j;
   for (i = 0; i < islands; ++i) *game->island[i] = (v3) { grand_f64() * game->screen->x, grand_f64() * game->screen->y, grand_range_f64(10, 40) };
-  for (i = 0; i <  decals; ++i) *game->decal [i] = (v3) { grand_f64() * game->screen->x * 1.2 - game->screen->x * 0.2, grand_f64() * game->screen->y * 1.2 - game->screen->y * 0.2, grand_f64() * 360 };
+  for (i = 0; i <  decals; ++i) *game->decal [i] = (v3) { grand_f64_next(local_grand) * game->screen->x * 1.2 - game->screen->x * 0.2, grand_f64_next(local_grand) * game->screen->y * 1.2 - game->screen->y * 0.2, grand_f64_next(local_grand) * 360 };
   for (i = 0; i < players; ++i)
   { for (j = 0; j < bullets; ++j)
     { *game->bullet[i][j] = (v3) {0};
@@ -275,7 +290,7 @@ DrawCircleWrapped(Vector2 center, float radius, Rectangle area, Color color)
 }
 
 void update_water_decals(game_t * game)
-{ for (size_t i = 0; i < decals; ++i) game->decal[i]->z += grand_f64(); }
+{ for (size_t i = 0; i < decals; ++i) game->decal[i]->z += grand_f64_next(local_grand); }
 
 void draw_water_decals(game_t * game)
 { for (size_t i = 0; i < decals; ++i)
@@ -684,6 +699,7 @@ main([[maybe_unused]] int ac, char ** av)
 
   size_t i;
   game_t game[1] = {0};
+  local_grand[0] = RANDOM_CONCAT(GRAND,_init_raw)((u32)av);
 
   /* fuck you this is memory safe */
   for (i = 1; (int) i < ac; ++i) if (av[i][0] == '-' && av[i][1] != '\0' && (av[i][1] == '?' || av[i][1] == 'h' || av[i][2] == 'h'))
